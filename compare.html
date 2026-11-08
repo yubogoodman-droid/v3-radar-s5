@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E1 和公開策略比｜阿彰 台指期</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Noto Sans TC', sans-serif; background: #0b0f17; color: #e2e8f0; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .card { background: rgba(17, 24, 39, 0.88); border: 1px solid rgba(51, 65, 85, 0.7); border-radius: 0.85rem; }
+  </style>
+</head>
+<body class="min-h-screen pb-16">
+  <header class="border-b border-slate-800 bg-slate-950/90 sticky top-0 z-30">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div>
+        <div class="text-xs text-blue-300">V3 雷達 S−5 · E1</div>
+        <h1 class="text-xl font-bold text-white">和網路上公開的策略放在一起看</h1>
+      </div>
+      <a href="index.html" class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-200">回到儀表板</a>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 mt-6 space-y-6">
+    <section class="card p-5 border-l-4 border-l-emerald-500 space-y-2">
+      <h2 class="text-lg font-bold text-white">長樣本比 0050 強。短樣本的期貨商品頁，E1 沒有打贏。</h2>
+      <p class="text-sm text-slate-300 leading-relaxed">
+        E1 全期是 2007-07-10 到 2026-11-06，年化 <span class="mono text-emerald-300">17.88%</span>、含夜盤最大回撤 <span class="mono text-rose-300">−33.10%</span>、日 Sharpe <span class="mono">0.783</span>。
+        下面每一列都先寫對方自己公布的數字，再寫把 E1 切到接近的同一段之後的結果。期間、槓桿、成本沒有完全對齊的，列在備註。
+      </p>
+    </section>
+
+    <section class="card p-5 space-y-3">
+      <h2 class="text-base font-bold text-white">同一張表</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left min-w-[760px]">
+          <thead class="text-xs text-slate-400 border-b border-slate-700">
+            <tr>
+              <th class="py-2 pr-3 font-medium">對照</th>
+              <th class="py-2 pr-3 font-medium">對方期間</th>
+              <th class="py-2 pr-3 font-medium text-right">對方年化</th>
+              <th class="py-2 pr-3 font-medium text-right">對方 MDD</th>
+              <th class="py-2 pr-3 font-medium text-right">對方 Sharpe</th>
+              <th class="py-2 pr-3 font-medium text-right">同段 E1 年化</th>
+              <th class="py-2 pr-3 font-medium text-right">同段 E1 夜盤 MDD</th>
+              <th class="py-2 font-medium text-right">同段 E1 Sharpe</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-200">
+            <tr class="border-b border-slate-800">
+              <td class="py-3 pr-3"><a class="text-blue-300 underline" href="https://finlab.finance/blog/taiwan-futures-settlement-day-backtest">0050 含息買進持有</a><div class="text-xs text-slate-500">FinLab，現貨</div></td>
+              <td class="py-3 pr-3 text-xs">2007-04 至 2026-11</td>
+              <td class="py-3 pr-3 text-right mono">13.5%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−55.8%</td>
+              <td class="py-3 pr-3 text-right mono">0.72</td>
+              <td class="py-3 pr-3 text-right mono text-emerald-300">17.9%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−33.1%</td>
+              <td class="py-3 text-right mono">0.78</td>
+            </tr>
+            <tr class="border-b border-slate-800">
+              <td class="py-3 pr-3"><a class="text-blue-300 underline" href="https://www.tejwin.com/insight/tq_future_%E6%B3%A2%E5%8B%95%E7%8E%87%E8%AA%BF%E6%95%B4%E6%8C%81%E5%80%89%E5%8B%95%E8%83%BD%E6%9C%9F%E8%B2%A8%E7%AD%96%E7%95%A5/">TEJ 波動率調整動能</a><div class="text-xs text-slate-500">多商品、只做多、總槓桿 0.50</div></td>
+              <td class="py-3 pr-3 text-xs">2020-01 至 2025-11</td>
+              <td class="py-3 pr-3 text-right mono">24.9%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−20.1%</td>
+              <td class="py-3 pr-3 text-right mono">1.40</td>
+              <td class="py-3 pr-3 text-right mono text-emerald-300">36.1%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−31.0%</td>
+              <td class="py-3 text-right mono">1.31</td>
+            </tr>
+            <tr class="border-b border-slate-800">
+              <td class="py-3 pr-3"><a class="text-blue-300 underline" href="https://finlab.finance/blog/retail-long-short-ratio">散戶多空智慧曝險</a><div class="text-xs text-slate-500">0050 / 00631L，平均槓桿 1.33</div></td>
+              <td class="py-3 pr-3 text-xs">2018 至 2026-06</td>
+              <td class="py-3 pr-3 text-right mono">32.5%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−37.6%</td>
+              <td class="py-3 pr-3 text-right mono text-slate-500">月索提諾 2.13</td>
+              <td class="py-3 pr-3 text-right mono text-emerald-300">41.1%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−31.0%</td>
+              <td class="py-3 text-right mono">1.41</td>
+            </tr>
+            <tr class="border-b border-slate-800">
+              <td class="py-3 pr-3"><a class="text-blue-300 underline" href="https://blave.org/agent/zh/library">Blave Supertrend</a><div class="text-xs text-slate-500">台指期 1 小時、只做多，起迄未寫</div></td>
+              <td class="py-3 pr-3 text-xs">約 11.3 年</td>
+              <td class="py-3 pr-3 text-right mono">31.4%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−16.5%</td>
+              <td class="py-3 pr-3 text-right mono">1.67</td>
+              <td class="py-3 pr-3 text-right mono text-emerald-300">31.3%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−31.0%</td>
+              <td class="py-3 text-right mono">1.22</td>
+            </tr>
+            <tr>
+              <td class="py-3 pr-3"><a class="text-blue-300 underline" href="https://www.masterlink.com.tw/zip/20250102111909/c.PDF">元富「守望者」</a><div class="text-xs text-slate-500">全日盤兩支波段，產品簡報</div></td>
+              <td class="py-3 pr-3 text-xs">2017-06 至 2024-08</td>
+              <td class="py-3 pr-3 text-right mono">35.65%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−26.32%</td>
+              <td class="py-3 pr-3 text-right mono text-slate-500">未公布</td>
+              <td class="py-3 pr-3 text-right mono text-emerald-300">26.5%</td>
+              <td class="py-3 pr-3 text-right mono text-rose-300">−29.5%</td>
+              <td class="py-3 text-right mono">1.16</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-xs text-slate-500 leading-relaxed">
+        Blave 那一列的 E1 用 2015-01-05 至 2026-06-30（11.5 年）對齊「約 11.3 年」，不是對方的原始起迄。守望者公布的是「最大連續回檔 26.32%」，不是和 E1 同一套夜盤估價。E1 的 Sharpe 是日報酬、不扣無風險利率。
+      </p>
+    </section>
+
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <article class="card p-5 space-y-2">
+        <h3 class="font-bold text-white">站得住的比較</h3>
+        <p class="text-sm text-slate-300 leading-relaxed">0050 和 E1 都涵蓋 2008、2011 和 2022。E1 年化高約 4 個百分點，最大回撤少約 23 個百分點。這是目前公開資料裡最接近的長樣本基準。</p>
+      </article>
+      <article class="card p-5 space-y-2">
+        <h3 class="font-bold text-white">不能直接說打贏的部分</h3>
+        <p class="text-sm text-slate-300 leading-relaxed">守望者年化更高、回檔更淺。Blave 年化接近，回撤寫到 −16.5%。TEJ 的 Sharpe 較高，但總槓桿只有 0.5 倍，而且樣本從 2020 年才開始。這些頁面是在賣策略或展示策略庫。</p>
+      </article>
+    </section>
+
+    <section class="card p-5 space-y-2">
+      <h2 class="text-base font-bold text-white">怎麼讀 E1 自己的全期</h2>
+      <p class="text-sm text-slate-300 leading-relaxed">
+        全期 17.88% 含 2008 與 2011。把起點改到 2015 或 2018，E1 年化會升到 31%–41%，因為少掉前面的熊市。夜盤 MDD 仍在 −31% 附近，沒有因為少掉早期就變成 −16%。
+        2010-01-15 到 2011-12-01 的收盤回撤 −32.87%，直到 2015-04-27 才回到高點。2026-06-22 之後到 11 月 6 日，今年獲利還在，但已從高點回撤約 −31.5%，這一段還沒回復。
+      </p>
+      <p class="text-xs text-slate-500">研究頁，沒有下單。歷史回測不是未來績效。</p>
+    </section>
+  </main>
+</body>
+</html>
