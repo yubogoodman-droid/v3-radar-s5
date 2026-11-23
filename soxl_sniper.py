@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """
-SOXLUSDT 5m「創 4 小時高點後 + 五分K同時跌破 MA25 & MA30」起跌點狙擊與回測腳本 (極簡穩健版)
-==========================================================================================
-專注單一標的：SOXLUSDT (Binance 3倍做多半導體永續合約，不加 3 日線濾網、規則極簡透明)
+SOXLUSDT 5m「創 4 小時高點後 + 五分K同時跌破 MA25 & MA30」起跌點狙擊與回測腳本 (V2 不空完美多頭排列版)
+========================================================================================================
+專注單一標的：SOXLUSDT (Binance 3倍做多半導體永續合約，極簡穩健版)
 
 核心策略邏輯：
-  1. 【創 4H 高點過熱條件】：過去 24 根 5m K (2 小時) 內創下 4 小時新高，且高點距離綠線 MA(60) >= 6.0 倍
-     5m ATR(14)（捕捉如 11/18 07:10 衝上 56.08、乖離達 6.4 倍 ATR 的極度過熱高點），且創高後尚未跌破雙線。
-  2. 【五分 K 一根同時跌破 MA25 & MA30】：
+  1. 【僅做週一～週五美東交易日】：避開週六日美股完全休市的無量假破線（自動處理美東夏/冬令時）。
+  2. 【創 4H 高點過熱條件】：過去 24 根 5m K (2 小時) 內創下 4 小時新高，且高點距離綠線 MA(60) >= 5.5 倍
+     5m ATR(14)，且創高後尚未跌破雙線。
+  3. 【破雙線 + 不空完美多頭排列（核心結構鐵律）】：
      - 前一根 5m K 收盤同時在粉紅線 MA(25) 與深藍線 MA(30) 之上
-     - 當根 5m K 出現帶力道的實體黑 K (實體長度 >= 0.75 倍 ATR)，收盤一舉同時跌破 MA(25) 與 MA(30)，且 MA(7) 下彎
-  3. 【純結構前高停損 + 50/50 動態 ATR 止盈】（與 SOXS 完全相同之風控模型）：
-     - 初始停損：直接設在剛創下的 4H 高點上方 (4H前高 + 0.2*ATR)，不被破線後回測均線的小反抽洗出場
+     - 當根 5m K 收黑且收盤同時跌破 MA(25) 與 MA(30)，且短線 MA(7) 下彎
+     - ★【不逆勢空漂亮多頭排列】：若當下仍呈五線標準多頭排列 (MA7 > MA14 > MA25 > MA30 > MA60)，直接放棄！
+       必須等到多頭排列已被破壞（如短線 MA7 <= MA14 死亡交叉，或如 11/18 截圖 MA14 <= MA25）才進場做空。
+  4. 【純結構前高停損 + 50/50 動態 ATR 止盈】：
+     - 初始停損：直接設在剛創下的 4H 高點上方 (4H前高 + 0.2*ATR)
      - 前 50% 倉位 (TP1)：順向跌達 2.5 倍 ATR 立刻落袋，次根 K 起將尾倉防守移至進場價 + 0.2*ATR
      - 後 50% 尾倉 (TP2)：順向跌達 3.75 倍 ATR 後收盤站回青線 MA(14) 鎖利，或達 6.0 倍 ATR 止盈 (最長持倉 4H)
 
 使用方式：
   python3 soxl_sniper.py                                  # 預設跑完整 4 個月 (2026-07-23 ~ 2026-11-21)
-  python3 soxl_sniper.py --start 2026-10-21 --end 2026-11-21
   python3 soxl_sniper.py --fee-rt 0.25                    # 3 倍高滑價壓力測試
   python3 soxl_sniper.py --export-json soxl_trades.json
 """
@@ -35,9 +37,8 @@ SYMBOL = "SOXLUSDT"
 TZ_TPE = timezone(timedelta(hours=8))
 
 CONFIG = {
-    "lookback_after_high": 24,  # 創 4H 高點後 24 根 5m K 內 (2 小時內，涵蓋高檔雙頂/右肩結構如 11/18 截圖)
-    "min_surge_atr": 6.0,       # 4H 高點離綠線 MA(60) >= 6.0 倍 ATR(14)
-    "min_body_atr": 0.75,       # 破線黑 K 實體長度 (Open - Close) >= 0.75 倍 ATR(14)
+    "lookback_after_high": 24,  # 創 4H 高點後 24 根 5m K 內 (2 小時內，涵蓋雙頂/右肩結構如 11/18 截圖)
+    "min_surge_atr": 5.5,       # 4H 高點離綠線 MA(60) >= 5.5 倍 ATR(14)
     "peak_stop_buf_atr": 0.2,   # 純結構前高停損：4H 前高 + 0.2 倍 ATR
     "tp1_atr": 2.5,             # 前 50% 倉位止盈目標：2.5 倍 ATR
     "tp2_atr": 6.0,             # 後 50% 尾倉止盈目標：6.0 倍 ATR
@@ -45,6 +46,19 @@ CONFIG = {
     "runner_ma14_atr": 3.75,    # 順向跌達 3.75 倍 ATR 後，站回 MA14 移動停利
     "max_hold_bars": 48,        # 最長持倉 48 根 5m K (4 小時)
 }
+
+
+def is_us_dst(dt_utc: datetime) -> bool:
+    """標準美東夏令時間判斷：3 月第二個週日 07:00 UTC 至 11 月第一個週日 06:00 UTC"""
+    y = dt_utc.year
+    mar1 = datetime(y, 3, 1, tzinfo=timezone.utc)
+    days_to_sun_mar = (6 - mar1.weekday()) % 7
+    dst_start = datetime(y, 3, 1 + days_to_sun_mar + 7, 7, 0, tzinfo=timezone.utc)
+
+    nov1 = datetime(y, 11, 1, tzinfo=timezone.utc)
+    days_to_sun_nov = (6 - nov1.weekday()) % 7
+    dst_end = datetime(y, 11, 1 + days_to_sun_nov, 6, 0, tzinfo=timezone.utc)
+    return dst_start <= dt_utc < dst_end
 
 
 def download_soxl_5m(start_ymd: str, end_ymd: str):
@@ -93,7 +107,7 @@ def download_soxl_5m(start_ymd: str, end_ymd: str):
 
 
 def compute_indicators(rows):
-    """計算 MA(7/14/25/30/60/99/200)、ATR(14) 與 4H 新高"""
+    """計算 MA(7/14/25/30/60/99/200)、ATR(14)、4H 新高與美東平日標記"""
     n = len(rows)
     closes = [r["close"] for r in rows]
     highs = [r["high"] for r in rows]
@@ -126,9 +140,15 @@ def compute_indicators(rows):
         r["high_4h"] = max(highs[i - 47:i + 1]) if i >= 47 else None
         r["is_new_4h_high"] = (i >= 47 and r["high"] >= max(highs[i - 47:i]))
 
+        dt_utc = datetime.fromtimestamp(r["ts"], timezone.utc)
+        offset_h = -4 if is_us_dst(dt_utc) else -5
+        dt_et = dt_utc + timedelta(hours=offset_h)
+        r["et_wd"] = dt_et.weekday()
+        r["et_hm"] = dt_et.hour * 100 + dt_et.minute
+
 
 def backtest_soxl(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_rt_pct: float = 0.08):
-    """執行 SOXLUSDT 極簡穩健回測（創 4H 高點後首次一根黑 K 同時跌破 MA25 & MA30、純前高停損、零重疊持倉）"""
+    """執行 SOXLUSDT V2 回測（美東平日 + 創4H高點 + 同時跌破MA25&MA30 + 不空完美多頭排列）"""
     cfg = CONFIG
     trades = []
     last_used_peak_idx = -1
@@ -143,7 +163,11 @@ def backtest_soxl(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_r
         if r["dt"] < backtest_start_dt:
             continue
 
-        # 1. 核心觸發：前一根收盤同時在 MA25 & MA30 之上，當根收盤同時跌破 MA25 & MA30 + 實體黑K + MA7 下彎
+        # 1. 僅做美東週一～週五平日（避開週六日美股休市無量盤）
+        if r["et_wd"] > 4:
+            continue
+
+        # 2. 核心觸發：前一根收盤同時在 MA25 & MA30 之上，當根收黑且收盤同時跌破 MA25 & MA30 + MA7 下彎
         below_both_now = (r["close"] < r["ma25"]) and (r["close"] < r["ma30"])
         above_both_prev = (prev["close"] >= prev["ma25"]) and (prev["close"] >= prev["ma30"])
         if not (below_both_now and above_both_prev):
@@ -151,13 +175,15 @@ def backtest_soxl(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_r
         if not (r["close"] < r["open"] and r["ma7"] < prev["ma7"]):
             continue
 
+        # 3. ★ 不空完美多頭排列：五線標準多頭 (MA7 > MA14 > MA25 > MA30 > MA60) 時絕不逆勢做空
+        if r["ma7"] > r["ma14"] > r["ma25"] > r["ma30"] > r["ma60"]:
+            continue
+
         atr = r["atr14"]
         if not atr or atr <= 0:
             continue
-        if (r["open"] - r["close"]) / atr < cfg["min_body_atr"]:
-            continue
 
-        # 2. 過去 24 根 K 棒 (2 小時) 內剛創 4H 新高，且高點離綠線 MA60 >= 6.0 倍 ATR，且創高後尚未跌破過雙線
+        # 4. 過去 24 根 K 棒 (2 小時) 內剛創 4H 新高，且高點離綠線 MA60 >= 5.5 倍 ATR，且創高後尚未跌破過雙線
         win_start = max(48, i - cfg["lookback_after_high"])
         peak_idx = None
         peak_high = -1.0
@@ -179,7 +205,7 @@ def backtest_soxl(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_r
         if surge_in_atr < cfg["min_surge_atr"]:
             continue
 
-        # 3. 純結構前高停損 + 50/50 動態 ATR 分批出場
+        # 5. 純結構前高停損 + 50/50 動態 ATR 分批出場
         last_used_peak_idx = peak_idx
         entry_p = r["close"]
         orig_stop = peak_high + cfg["peak_stop_buf_atr"] * atr
@@ -334,7 +360,7 @@ def print_report(trades: list, title: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SOXLUSDT 5m 起跌點狙擊 (創4H高點 + 一根同時跌破MA25&MA30)")
+    parser = argparse.ArgumentParser(description="SOXLUSDT 5m 起跌點狙擊 (V2 不空完美多頭排列版)")
     parser.add_argument("--start", default="2026-07-23", help="正式回測起始日 (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-11-21", help="正式回測結束日 (YYYY-MM-DD)")
     parser.add_argument("--fee-rt", type=float, default=0.08, help="來回手續費+滑價總成本 %% (預設 0.08%%)")
@@ -347,7 +373,7 @@ def main():
     compute_indicators(rows)
     trades = backtest_soxl(rows, backtest_start_dt=f"{args.start} 00:00", fee_rt_pct=args.fee_rt)
 
-    print_report(trades, f"SOXLUSDT 5m 起跌點狙擊 (創4H高點+同時跌破MA25&MA30｜{args.start} ~ {args.end}｜成本 {args.fee_rt:.2f}%)")
+    print_report(trades, f"SOXLUSDT 5m 起跌點狙擊 V2 (不空完美多頭排列｜{args.start} ~ {args.end}｜成本 {args.fee_rt:.2f}%)")
 
     if args.export_json:
         with open(args.export_json, "w", encoding="utf-8") as f:
