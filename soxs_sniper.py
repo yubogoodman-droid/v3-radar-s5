@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-SOXSUSDT 5m「創 4 小時高點後 + 同時跌破 MA25 & MA30」起跌點狙擊與回測腳本 (V3 專屬穩健版)
-==========================================================================================
-專注單一標的：SOXSUSDT (Binance 3倍做空半導體永續合約，具長期波動率耗損與恐慌衝高回落特性)
+SOXSUSDT 5m「創 4 小時高點後 + 同時跌破 MA25 & MA30」起跌點狙擊與回測腳本 (極簡穩健版)
+======================================================================================
+專注單一標的：SOXSUSDT (Binance 3倍做空半導體永續合約，不加 3 日線濾網、規則極簡)
 
-V3 核心策略邏輯：
-  1. 【3 日大趨勢過濾】：3 日均線 (72H = 864 根 5m K) 斜率必須向下（只在半導體多頭趨勢中，
-     狙擊 SOXS 恐慌急拉後的回吐段，絕不逆大勢空在 SOXS 主升段）。
-  2. 【美股正盤時段】：嚴格限定週一～週五美股現金正盤 (美東 ET 09:30 ~ 16:00，自動處理夏/冬令時)，
+核心策略邏輯：
+  1. 【美股正盤時段】：嚴格限定週一～週五美股現金正盤 (美東 ET 09:30 ~ 16:00，自動處理夏/冬令時)，
      徹底過濾亞洲盤與週末缺乏現貨報價的無量假破線。
-  3. 【起跌觸發條件】：過去 15 根 5m K (75 分鐘) 內創下 4 小時新高，且高點距離綠線 MA(60) >= 4.0 倍
+  2. 【起跌觸發條件】：過去 15 根 5m K (75 分鐘) 內創下 4 小時新高，且高點距離綠線 MA(60) >= 5.0 倍
      5m ATR(14)；接著出現實體下跌黑 K 同時收盤跌破 MA(25) 與 MA(30)，且短線 MA(7) 下彎。
-  4. 【全 ATR 動態 50/50 分批出場】：
-     - 初始停損：min(4H前高 + 0.2*ATR, 進場價 + 2.5*ATR)
+  3. 【純結構前高停損 + 50/50 動態 ATR 止盈】：
+     - 初始停損：直接設在剛創下的 4H 高點上方一點點 (4H前高 + 0.2*ATR)，不被進場小反抽洗出場
      - 前 50% 倉位 (TP1)：順向跌達 2.5 倍 ATR 立刻落袋，次根 K 起將尾倉防守移至進場價 + 0.2*ATR
      - 後 50% 尾倉 (TP2)：順向跌達 3.75 倍 ATR 後收盤站回青線 MA(14) 鎖利，或達 6.0 倍 ATR 止盈 (最長持倉 4H)
 
@@ -20,7 +18,7 @@ V3 核心策略邏輯：
   python3 soxs_sniper.py                                  # 預設跑完整 4 個月 (2026-07-23 ~ 2026-11-21)
   python3 soxs_sniper.py --start 2026-07-23 --end 2026-11-21 --fee-rt 0.08
   python3 soxs_sniper.py --fee-rt 0.25                    # 3 倍高滑價壓力測試
-  python3 soxs_sniper.py --export-json soxs_v3_trades.json
+  python3 soxs_sniper.py --export-json soxs_trades.json
 """
 
 import argparse
@@ -35,13 +33,10 @@ from datetime import datetime, timedelta, timezone
 SYMBOL = "SOXSUSDT"
 TZ_TPE = timezone(timedelta(hours=8))
 
-V3_CONFIG = {
-    "trend_ma_bars": 864,       # 3 日均線 (72 小時 = 864 根 5m K)
-    "trend_slope_bars": 48,     # 與 4 小時前比較斜率是否向下
+CONFIG = {
     "lookback_after_high": 15,  # 創 4H 高點後 15 根 5m K 內 (75 分鐘內)
-    "min_surge_atr": 4.0,       # 4H 高點離綠線 MA(60) >= 4.0 倍 ATR(14)
-    "sl_atr": 2.5,              # 動態初始停損上限：2.5 倍 ATR
-    "peak_stop_buf_atr": 0.2,   # 前高上方緩衝：0.2 倍 ATR
+    "min_surge_atr": 5.0,       # 4H 高點離綠線 MA(60) >= 5.0 倍 ATR(14)
+    "peak_stop_buf_atr": 0.2,   # 純結構前高停損：4H 前高 + 0.2 倍 ATR
     "tp1_atr": 2.5,             # 前 50% 倉位止盈目標：2.5 倍 ATR
     "tp2_atr": 6.0,             # 後 50% 尾倉止盈目標：6.0 倍 ATR
     "runner_be_buf_atr": 0.2,   # TP1 觸發後，尾倉防守移至進場價 + 0.2 倍 ATR
@@ -111,7 +106,7 @@ def download_soxs_5m(start_ymd: str, end_ymd: str):
 
 
 def compute_indicators(rows):
-    """計算 MA(7/14/25/30/60/99/200)、3日均線 (864根)、ATR(14)、4H 新高與美東盤中時間"""
+    """計算 MA(7/14/25/30/60/99/200)、ATR(14)、4H 新高與美東盤中時間"""
     n = len(rows)
     closes = [r["close"] for r in rows]
     highs = [r["high"] for r in rows]
@@ -130,8 +125,6 @@ def compute_indicators(rows):
             tr = max(r["high"] - r["low"], abs(r["high"] - prev_c), abs(r["low"] - prev_c))
         tr_ps[i + 1] = tr_ps[i] + tr
 
-    trend_bars = V3_CONFIG["trend_ma_bars"]
-
     for i in range(n):
         r = rows[i]
         r["ma7"] = (ps[i + 1] - ps[i + 1 - 7]) / 7.0 if i >= 6 else None
@@ -141,7 +134,6 @@ def compute_indicators(rows):
         r["ma60"] = (ps[i + 1] - ps[i + 1 - 60]) / 60.0 if i >= 59 else None
         r["ma99"] = (ps[i + 1] - ps[i + 1 - 99]) / 99.0 if i >= 98 else None
         r["ma200"] = (ps[i + 1] - ps[i + 1 - 200]) / 200.0 if i >= 199 else None
-        r["ma_3d"] = (ps[i + 1] - ps[i + 1 - trend_bars]) / trend_bars if i >= trend_bars - 1 else None
         r["atr14"] = (tr_ps[i + 1] - tr_ps[i + 1 - 14]) / 14.0 if i >= 13 else None
         r["atr_pct"] = (r["atr14"] / r["close"] * 100.0) if r["atr14"] else None
         r["high_4h"] = max(highs[i - 47:i + 1]) if i >= 47 else None
@@ -154,17 +146,15 @@ def compute_indicators(rows):
         r["et_hm"] = dt_et.hour * 100 + dt_et.minute
 
 
-def backtest_soxs_v3(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_rt_pct: float = 0.08):
-    """執行 SOXSUSDT 專屬 V3 穩健回測（零重疊持倉、保守同K先算停損）"""
-    cfg = V3_CONFIG
+def backtest_soxs(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_rt_pct: float = 0.08):
+    """執行 SOXSUSDT 極簡穩健回測（無 3 日線濾網、純結構前高停損、零重疊持倉）"""
+    cfg = CONFIG
     trades = []
     last_used_peak_idx = -1
     busy_until_idx = -1
     max_hold = cfg["max_hold_bars"]
-    slope_bars = cfg["trend_slope_bars"]
-    start_scan = cfg["trend_ma_bars"] + slope_bars
 
-    for i in range(start_scan, len(rows) - 1):
+    for i in range(200, len(rows) - 1):
         if i <= busy_until_idx:
             continue
         r = rows[i]
@@ -184,17 +174,11 @@ def backtest_soxs_v3(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fe
         if not (r["close"] < r["open"] and r["ma7"] < prev["ma7"]):
             continue
 
-        # 3. 3 日大趨勢過濾：SOXS 3 日均線下彎（順半導體多頭空 SOXS 恐慌急拉）
-        if r["ma_3d"] is None or rows[i - slope_bars]["ma_3d"] is None:
-            continue
-        if r["ma_3d"] >= rows[i - slope_bars]["ma_3d"]:
-            continue
-
         atr = r["atr14"]
         if not atr or atr <= 0:
             continue
 
-        # 4. 過去 15 根 K 棒內剛創 4H 新高，且高點離綠線 MA60 >= 4.0 倍 ATR
+        # 3. 過去 15 根 K 棒內剛創 4H 新高，且高點離綠線 MA60 >= 5.0 倍 ATR
         win_start = max(48, i - cfg["lookback_after_high"])
         peak_idx = None
         peak_high = -1.0
@@ -214,10 +198,10 @@ def backtest_soxs_v3(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fe
         if surge_in_atr < cfg["min_surge_atr"]:
             continue
 
-        # 5. 全 ATR 動態 50/50 分批出場管理
+        # 4. 純結構前高停損 + 50/50 動態 ATR 分批出場
         last_used_peak_idx = peak_idx
         entry_p = r["close"]
-        orig_stop = min(peak_high + cfg["peak_stop_buf_atr"] * atr, entry_p + cfg["sl_atr"] * atr)
+        orig_stop = peak_high + cfg["peak_stop_buf_atr"] * atr
         tp1_p = entry_p - cfg["tp1_atr"] * atr
         tp2_p = entry_p - cfg["tp2_atr"] * atr
 
@@ -342,11 +326,11 @@ def print_report(trades: list, title: str):
         else:
             cur_cl = 0
 
-    print("=" * 116)
+    print("=" * 118)
     print(f"【{title}】")
     print(f"  總出手：{n} 筆 ｜ 實戰勝率：{len(wins)}/{n} ({len(wins)/n*100:.1f}%) ｜ 獲利因子 (PF)：{pf:.2f} ｜ 盈虧比：{payoff:.2f}（均賺 {avg_w:+.2f}% / 均賠 {avg_l:+.2f}%）")
     print(f"  累計淨報酬（1x 無槓桿單利）：{tot:+.2f}%（3x 槓桿估算 {tot*3:+.1f}%） ｜ 最大回撤 (MDD)：-{mdd:.2f}% ｜ 最大連虧：{max_cl} 筆")
-    print("-" * 116)
+    print("-" * 118)
     print("  逐月表現：")
     by_m = {}
     for t in trades:
@@ -355,33 +339,34 @@ def print_report(trades: list, title: str):
         arr = by_m[ym]
         w = sum(1 for x in arr if x["net_ret_pct"] > 0)
         print(f"    {ym} | {len(arr):>2} 筆 | 勝率 {w:>2}/{len(arr):<2} ({w/len(arr)*100:5.1f}%) | 月淨利 {sum(x['net_ret_pct'] for x in arr):>+6.2f}%")
-    print("-" * 116)
-    print(f"{'#':>2} | {'進場時間 (TPE)':<16} | {'進場價':>6} | {'4H高點':>6} | {'乖離':>6} | {'5m波動':>6} | {'4H最大跌':>7} | {'淨損益':>7} | {'動態分批出場明細'}")
-    print("-" * 116)
+    print("-" * 118)
+    print(f"{'#':>2} | {'進場時間 (TPE)':<16} | {'進場價':>6} | {'4H高點':>6} | {'前高停損':>6} | {'乖離':>6} | {'4H最大跌':>7} | {'淨損益':>7} | {'動態分批出場明細'}")
+    print("-" * 118)
     for idx, t in enumerate(trades, 1):
+        star = " ★10/31截圖" if t["entry_dt"].startswith("2026-10-31 03:") else ""
         print(
             f"{idx:>2} | {t['entry_dt']:<16} | {t['entry_p']:>6.2f} | "
-            f"{t['peak_high']:>6.2f} | {t['surge_atr']:>4.1f}AT | {t['atr_pct']:>5.2f}% | "
-            f"-{t['drop_4h_pct']:>5.2f}% | {t['net_ret_pct']:>+6.2f}% | {t['reason']}"
+            f"{t['peak_high']:>6.2f} | {t['stop_p']:>6.2f} | {t['surge_atr']:>4.1f}AT | "
+            f"-{t['drop_4h_pct']:>5.2f}% | {t['net_ret_pct']:>+6.2f}% | {t['reason']}{star}"
         )
-    print("=" * 116)
+    print("=" * 118)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SOXSUSDT 5m 起跌點狙擊 V3 專屬穩健回測腳本")
+    parser = argparse.ArgumentParser(description="SOXSUSDT 5m 起跌點狙擊 (無 3 日線極簡穩健版)")
     parser.add_argument("--start", default="2026-07-23", help="正式回測起始日 (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-11-21", help="正式回測結束日 (YYYY-MM-DD)")
     parser.add_argument("--fee-rt", type=float, default=0.08, help="來回手續費+滑價總成本 %% (預設 0.08%%)")
     parser.add_argument("--export-json", default="", help="匯出交易明細 JSON 路徑")
     args = parser.parse_args()
 
-    warmup_start = (datetime.strptime(args.start, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
+    warmup_start = (datetime.strptime(args.start, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
     print(f"正在從 Binance 下載 {SYMBOL} 5m 歷史 K 線 ({warmup_start} ~ {args.end})...")
     rows = download_soxs_5m(warmup_start, args.end)
     compute_indicators(rows)
-    trades = backtest_soxs_v3(rows, backtest_start_dt=f"{args.start} 00:00", fee_rt_pct=args.fee_rt)
+    trades = backtest_soxs(rows, backtest_start_dt=f"{args.start} 00:00", fee_rt_pct=args.fee_rt)
 
-    print_report(trades, f"SOXSUSDT 5m 起跌點狙擊 V3 專屬穩健版 ({args.start} ~ {args.end}｜來回成本 {args.fee_rt:.2f}%)")
+    print_report(trades, f"SOXSUSDT 5m 起跌點狙擊 (無 3 日線極簡穩健版｜{args.start} ~ {args.end}｜成本 {args.fee_rt:.2f}%)")
 
     if args.export_json:
         with open(args.export_json, "w", encoding="utf-8") as f:
