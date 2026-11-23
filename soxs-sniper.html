@@ -411,7 +411,11 @@
       }
       if (t.xi >= 0 && t.xi < bars.length) {
         const extra = (t.tp1_i >= 0 && Math.abs(t.xi - t.tp1_i) <= 5) ? 15 : 0;
-        drawTag(t.xi, bars[t.xi][3], `尾倉@${t.x_p.toFixed(2)}`, t.net > 0 ? '#059669' : '#e11d48', false, extra);
+        if (t.net > 0) {
+          drawTag(t.xi, bars[t.xi][3], `尾倉@${t.x_p.toFixed(2)}`, '#059669', false, extra);
+        } else {
+          drawTag(t.xi, Math.max(t.x_p, bars[t.xi][2]), `停損@${t.x_p.toFixed(2)}`, '#e11d48', true, 0);
+        }
       }
     }
 
