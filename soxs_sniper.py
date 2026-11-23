@@ -34,16 +34,17 @@ SYMBOL = "SOXSUSDT"
 TZ_TPE = timezone(timedelta(hours=8))
 
 CONFIG = {
-    "lookback_after_high": 15,  # 創 4H 高點後 15 根 5m K 內 (75 分鐘內)
-    "min_surge_atr": 5.0,       # 4H 高點離綠線 MA(60) >= 5.0 倍 ATR(14)
-    "peak_stop_buf_atr": 0.2,   # 純結構前高停損：4H 前高 + 0.2 倍 ATR
-    "tp1_atr": 2.5,             # 前 50% 倉位止盈目標：2.5 倍 ATR
-    "tp2_atr": 6.0,             # 後 50% 尾倉止盈目標：6.0 倍 ATR
-    "runner_be_buf_atr": 0.2,   # TP1 觸發後，尾倉防守移至進場價 + 0.2 倍 ATR
-    "runner_ma14_atr": 3.75,    # 順向跌達 3.75 倍 ATR 後，站回 MA14 移動停利
-    "max_hold_bars": 48,        # 最長持倉 48 根 5m K (4 小時)
-    "us_open_hm": 930,          # 美股正盤開盤 09:30 ET
-    "us_close_hm": 1600,        # 美股正盤收盤 16:00 ET
+    "lookback_after_high": 15,          # 創 4H 高點後 15 根 5m K 內 (75 分鐘內)
+    "min_surge_atr": 5.0,               # 4H 高點離綠線 MA(60) >= 5.0 倍 ATR(14)
+    "min_parabolic_over_ma25_pct": 2.8, # 若進場時 6 條均線仍呈完美多頭排列 (MA7>14>25>30>60>99)，要求高點離 MA25 至少急拉 >= 2.8%，否則視為「緩步推升的漂亮多頭排列」不逆勢空！
+    "peak_stop_buf_atr": 0.2,           # 純結構前高停損：4H 前高 + 0.2 倍 ATR
+    "tp1_atr": 2.5,                     # 前 50% 倉位止盈目標：2.5 倍 ATR
+    "tp2_atr": 6.0,                     # 後 50% 尾倉止盈目標：6.0 倍 ATR
+    "runner_be_buf_atr": 0.2,           # TP1 觸發後，尾倉防守移至進場價 + 0.2 倍 ATR
+    "runner_ma14_atr": 3.75,            # 順向跌達 3.75 倍 ATR 後，站回 MA14 移動停利
+    "max_hold_bars": 48,                # 最長持倉 48 根 5m K (4 小時)
+    "us_open_hm": 930,                  # 美股正盤開盤 09:30 ET
+    "us_close_hm": 1600,                # 美股正盤收盤 16:00 ET
 }
 
 
@@ -198,7 +199,14 @@ def backtest_soxs(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_r
         if surge_in_atr < cfg["min_surge_atr"]:
             continue
 
-        # 4. 純結構前高停損 + 50/50 動態 ATR 分批出場
+        # 4. 避開「多頭排列得太漂亮（6線全多頭且高點未急拉脫離MA25）」的緩步推升通道 (如原 #7 與 #9)
+        is_full_bull_stack = (r["ma7"] > r["ma14"] > r["ma25"] > r["ma30"] > r["ma60"] > r["ma99"])
+        peak_over_ma25_pct = (peak_high - peak_row["ma25"]) / peak_row["ma25"] * 100.0
+        if is_full_bull_stack and peak_over_ma25_pct < cfg["min_parabolic_over_ma25_pct"]:
+            last_used_peak_idx = peak_idx
+            continue
+
+        # 5. 純結構前高停損 + 50/50 動態 ATR 分批出場
         last_used_peak_idx = peak_idx
         entry_p = r["close"]
         orig_stop = peak_high + cfg["peak_stop_buf_atr"] * atr
