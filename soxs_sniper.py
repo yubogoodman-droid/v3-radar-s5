@@ -1,32 +1,26 @@
 #!/usr/bin/env python3
 """
-SOXSUSDT + SOXLUSDT 5m「創 4 小時高點後 + 同時跌破 MA25 & MA30」雙刀流起跌狙擊與回測腳本 (V3 穩健優化版)
-========================================================================================================
-V3 核心進化（解決 V2 過度擬合、非美股時段假破線、低波動月摸不到固定停利、牛市逆勢空 SOXL 四大痛點）：
-  1. 【大趨勢自動切換（3日均線 72H 下彎）】
-     - 半導體 3 日偏多 → SOXS 的 3 日均線下彎 → 自動只狙擊 SOXS 恐慌急拉的起跌點
-     - 半導體 3 日偏空 → SOXL 的 3 日均線下彎 → 自動只狙擊 SOXL 死貓跳反彈的起跌點
-     - 同一套通用參數套用於兩邊，永遠順著 3 日大趨勢吃 3x ETF 耗損與日內均值回歸，絕不逆勢擋火車！
-  2. 【嚴格限定週一～週五美股正盤時段（美東 ET 09:30 ~ 16:00）】
-     - 自動處理美國夏令 (UTC-4) / 冬令 (UTC-5) 時間切換，徹底避開亞洲盤與週末無量刷洗假破線。
-  3. 【全 ATR 動態風控與 50/50 分批止盈（自適應高低波動月份）】
-     - 4H 高點距離綠線 MA(60) 必須 >= 4.0 倍 5m ATR(14)（低波動月與高波動月自動縮放門檻）
+SOXSUSDT 5m「創 4 小時高點後 + 同時跌破 MA25 & MA30」起跌點狙擊與回測腳本 (V3 專屬穩健版)
+==========================================================================================
+專注單一標的：SOXSUSDT (Binance 3倍做空半導體永續合約，具長期波動率耗損與恐慌衝高回落特性)
+
+V3 核心策略邏輯：
+  1. 【3 日大趨勢過濾】：3 日均線 (72H = 864 根 5m K) 斜率必須向下（只在半導體多頭趨勢中，
+     狙擊 SOXS 恐慌急拉後的回吐段，絕不逆大勢空在 SOXS 主升段）。
+  2. 【美股正盤時段】：嚴格限定週一～週五美股現金正盤 (美東 ET 09:30 ~ 16:00，自動處理夏/冬令時)，
+     徹底過濾亞洲盤與週末缺乏現貨報價的無量假破線。
+  3. 【起跌觸發條件】：過去 15 根 5m K (75 分鐘) 內創下 4 小時新高，且高點距離綠線 MA(60) >= 4.0 倍
+     5m ATR(14)；接著出現實體下跌黑 K 同時收盤跌破 MA(25) 與 MA(30)，且短線 MA(7) 下彎。
+  4. 【全 ATR 動態 50/50 分批出場】：
      - 初始停損：min(4H前高 + 0.2*ATR, 進場價 + 2.5*ATR)
-     - 前 50% 倉位：順向跌達 2.5 倍 ATR 止盈落袋，並將尾倉防守移至進場價 + 0.2*ATR 保本
-     - 後 50% 尾倉：順向跌達 3.75 倍 ATR 後站回青線 MA(14) 鎖利，或達 6.0 倍 ATR 止盈（最長持倉 4H）
+     - 前 50% 倉位 (TP1)：順向跌達 2.5 倍 ATR 立刻落袋，次根 K 起將尾倉防守移至進場價 + 0.2*ATR
+     - 後 50% 尾倉 (TP2)：順向跌達 3.75 倍 ATR 後收盤站回青線 MA(14) 鎖利，或達 6.0 倍 ATR 止盈 (最長持倉 4H)
 
-資料來源：Binance Vision 官方歷史永續合約 K 線 (SOXSUSDT & SOXLUSDT 5m)
 使用方式：
-  1. 執行預設 4 個月全週期 V3 穩健回測 (2026-07-23 ~ 2026-11-21)：
-     python3 soxs_soxl_dual_sniper.py
-
-  2. 自訂日期、標的或滑價成本壓力測試：
-     python3 soxs_soxl_dual_sniper.py --start 2026-07-23 --end 2026-11-21 --fee-rt 0.08
-     python3 soxs_soxl_dual_sniper.py --symbol SOXSUSDT
-     python3 soxs_soxl_dual_sniper.py --fee-rt 0.25   # 3倍極端滑價壓力測試
-
-  3. 匯出 JSON 回測明細：
-     python3 soxs_soxl_dual_sniper.py --export-json v3_trades.json
+  python3 soxs_sniper.py                                  # 預設跑完整 4 個月 (2026-07-23 ~ 2026-11-21)
+  python3 soxs_sniper.py --start 2026-07-23 --end 2026-11-21 --fee-rt 0.08
+  python3 soxs_sniper.py --fee-rt 0.25                    # 3 倍高滑價壓力測試
+  python3 soxs_sniper.py --export-json soxs_v3_trades.json
 """
 
 import argparse
@@ -38,9 +32,9 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
+SYMBOL = "SOXSUSDT"
 TZ_TPE = timezone(timedelta(hours=8))
 
-# V3 統一通用參數（SOXS 與 SOXL 使用完全相同規則，杜絕單一標的過度擬合）
 V3_CONFIG = {
     "trend_ma_bars": 864,       # 3 日均線 (72 小時 = 864 根 5m K)
     "trend_slope_bars": 48,     # 與 4 小時前比較斜率是否向下
@@ -61,19 +55,18 @@ V3_CONFIG = {
 def is_us_dst(dt_utc: datetime) -> bool:
     """標準美東夏令時間判斷：3 月第二個週日 07:00 UTC 至 11 月第一個週日 06:00 UTC"""
     y = dt_utc.year
-    # 3 月第二個週日
     mar1 = datetime(y, 3, 1, tzinfo=timezone.utc)
     days_to_sun_mar = (6 - mar1.weekday()) % 7
     dst_start = datetime(y, 3, 1 + days_to_sun_mar + 7, 7, 0, tzinfo=timezone.utc)
-    # 11 月第一個週日
+
     nov1 = datetime(y, 11, 1, tzinfo=timezone.utc)
     days_to_sun_nov = (6 - nov1.weekday()) % 7
     dst_end = datetime(y, 11, 1 + days_to_sun_nov, 6, 0, tzinfo=timezone.utc)
     return dst_start <= dt_utc < dst_end
 
 
-def download_binance_5m(symbol: str, start_ymd: str, end_ymd: str):
-    """從 Binance Vision 官方歷史資料庫並行下載 5m 合約 K 線"""
+def download_soxs_5m(start_ymd: str, end_ymd: str):
+    """從 Binance Vision 官方歷史資料庫並行下載 SOXSUSDT 5m 永續合約 K 線"""
     start_dt = datetime.strptime(start_ymd, "%Y-%m-%d")
     end_dt = datetime.strptime(end_ymd, "%Y-%m-%d")
     dates = []
@@ -83,7 +76,7 @@ def download_binance_5m(symbol: str, start_ymd: str, end_ymd: str):
         cur += timedelta(days=1)
 
     def fetch_day(d):
-        url = f"https://data.binance.vision/data/futures/um/daily/klines/{symbol}/5m/{symbol}-5m-{d}.zip"
+        url = f"https://data.binance.vision/data/futures/um/daily/klines/{SYMBOL}/5m/{SYMBOL}-5m-{d}.zip"
         try:
             req = urllib.request.urlopen(url, timeout=12)
             z = zipfile.ZipFile(io.BytesIO(req.read()))
@@ -123,7 +116,6 @@ def compute_indicators(rows):
     closes = [r["close"] for r in rows]
     highs = [r["high"] for r in rows]
 
-    # Prefix sum for fast O(N) moving averages
     ps = [0.0] * (n + 1)
     for i in range(n):
         ps[i + 1] = ps[i] + closes[i]
@@ -162,8 +154,8 @@ def compute_indicators(rows):
         r["et_hm"] = dt_et.hour * 100 + dt_et.minute
 
 
-def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_rt_pct: float = 0.08):
-    """執行 V3 穩健雙刀流回測（單一標的零重疊持倉、保守同K先算停損）"""
+def backtest_soxs_v3(rows: list, backtest_start_dt: str = "2026-07-23 00:00", fee_rt_pct: float = 0.08):
+    """執行 SOXSUSDT 專屬 V3 穩健回測（零重疊持倉、保守同K先算停損）"""
     cfg = V3_CONFIG
     trades = []
     last_used_peak_idx = -1
@@ -184,7 +176,7 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
         if r["et_wd"] > 4 or not (cfg["us_open_hm"] <= r["et_hm"] <= cfg["us_close_hm"]):
             continue
 
-        # 2. 核心觸發：當根 5m 收盤同時跌破 MA25 & MA30（前一根還在其中至少一條之上）+ 實體黑K + MA7 下彎
+        # 2. 核心觸發：收盤同時跌破 MA25 & MA30（前一根還在之上）+ 實體黑K + MA7 下彎
         below_both_now = (r["close"] < r["ma25"]) and (r["close"] < r["ma30"])
         above_prev = (prev["close"] >= prev["ma25"]) or (prev["close"] >= prev["ma30"])
         if not (below_both_now and above_prev):
@@ -192,7 +184,7 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
         if not (r["close"] < r["open"] and r["ma7"] < prev["ma7"]):
             continue
 
-        # 3. 3 日大趨勢自動切換：3 日均線必須下彎（順大勢狙擊反彈起跌點，不擋火車）
+        # 3. 3 日大趨勢過濾：SOXS 3 日均線下彎（順半導體多頭空 SOXS 恐慌急拉）
         if r["ma_3d"] is None or rows[i - slope_bars]["ma_3d"] is None:
             continue
         if r["ma_3d"] >= rows[i - slope_bars]["ma_3d"]:
@@ -202,7 +194,7 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
         if not atr or atr <= 0:
             continue
 
-        # 4. 過去 15 根 K 棒內（75 分鐘內）曾創下 4 小時新高，且高點距離綠線 MA60 >= 4.0 倍 ATR
+        # 4. 過去 15 根 K 棒內剛創 4H 新高，且高點離綠線 MA60 >= 4.0 倍 ATR
         win_start = max(48, i - cfg["lookback_after_high"])
         peak_idx = None
         peak_high = -1.0
@@ -222,7 +214,7 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
         if surge_in_atr < cfg["min_surge_atr"]:
             continue
 
-        # 5. 動態 ATR 50/50 分批出場管理
+        # 5. 全 ATR 動態 50/50 分批出場管理
         last_used_peak_idx = peak_idx
         entry_p = r["close"]
         orig_stop = min(peak_high + cfg["peak_stop_buf_atr"] * atr, entry_p + cfg["sl_atr"] * atr)
@@ -278,7 +270,6 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
                     exit_p = rk["close"]
                     d2 = f"尾倉MA14({ret2:+.1f}%)"
 
-            # 次根 K 起將尾倉防守移至進場價 + 0.2*ATR
             if just_hit_tp1:
                 stop2 = min(stop2, entry_p + cfg["runner_be_buf_atr"] * atr)
 
@@ -299,7 +290,7 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
         drop_4h = (entry_p - f4h_low) / entry_p * 100.0
 
         trades.append({
-            "symbol": symbol,
+            "symbol": SYMBOL,
             "peak_dt": peak_row["dt"],
             "peak_high": round(peak_high, 2),
             "surge_atr": round(surge_in_atr, 1),
@@ -320,8 +311,7 @@ def backtest_v3(symbol: str, rows: list, backtest_start_dt: str = "2026-07-23 00
     return trades
 
 
-def summarize_portfolio(all_trades: list, title: str):
-    trades = sorted(all_trades, key=lambda x: x["entry_dt"])
+def print_report(trades: list, title: str):
     n = len(trades)
     if n == 0:
         print(f"【{title}】無符合條件之交易。")
@@ -352,15 +342,11 @@ def summarize_portfolio(all_trades: list, title: str):
         else:
             cur_cl = 0
 
-    soxs_t = [t for t in trades if t["symbol"] == "SOXSUSDT"]
-    soxl_t = [t for t in trades if t["symbol"] == "SOXLUSDT"]
-
-    print("=" * 124)
+    print("=" * 116)
     print(f"【{title}】")
-    print(f"  總出手：{n} 筆（SOXS {len(soxs_t)} 筆 {sum(t['net_ret_pct'] for t in soxs_t):+.2f}% ｜ SOXL {len(soxl_t)} 筆 {sum(t['net_ret_pct'] for t in soxl_t):+.2f}%）")
-    print(f"  實戰勝率：{len(wins)}/{n} ({len(wins)/n*100:.1f}%) ｜ 獲利因子 (PF)：{pf:.2f} ｜ 盈虧比：{payoff:.2f}（平均賺 {avg_w:+.2f}% / 平均賠 {avg_l:+.2f}%）")
-    print(f"  累計淨報酬（1x 無槓桿單利）：{tot:+.2f}% ｜ 最大回撤 (MDD)：-{mdd:.2f}% ｜ 報酬回撤比：{tot/mdd if mdd > 0 else 99.9:.2f}x ｜ 最大連虧：{max_cl} 筆")
-    print("-" * 124)
+    print(f"  總出手：{n} 筆 ｜ 實戰勝率：{len(wins)}/{n} ({len(wins)/n*100:.1f}%) ｜ 獲利因子 (PF)：{pf:.2f} ｜ 盈虧比：{payoff:.2f}（均賺 {avg_w:+.2f}% / 均賠 {avg_l:+.2f}%）")
+    print(f"  累計淨報酬（1x 無槓桿單利）：{tot:+.2f}%（3x 槓桿估算 {tot*3:+.1f}%） ｜ 最大回撤 (MDD)：-{mdd:.2f}% ｜ 最大連虧：{max_cl} 筆")
+    print("-" * 116)
     print("  逐月表現：")
     by_m = {}
     for t in trades:
@@ -368,52 +354,39 @@ def summarize_portfolio(all_trades: list, title: str):
     for ym in sorted(by_m):
         arr = by_m[ym]
         w = sum(1 for x in arr if x["net_ret_pct"] > 0)
-        sc = sum(1 for x in arr if x["symbol"] == "SOXSUSDT")
-        lc = sum(1 for x in arr if x["symbol"] == "SOXLUSDT")
-        print(f"    {ym} | {len(arr):>2} 筆 (SOXS {sc:>2} / SOXL {lc:>2}) | 勝率 {w:>2}/{len(arr):<2} ({w/len(arr)*100:5.1f}%) | 月淨利 {sum(x['net_ret_pct'] for x in arr):>+6.2f}%")
-    print("-" * 124)
-    print(f"{'#':>2} | {'標的':<8} | {'進場時間 (TPE)':<16} | {'進場價':>6} | {'4H高點':>6} | {'乖離':>6} | {'5m波動':>6} | {'4H最大跌':>7} | {'淨損益':>7} | {'動態分批出場明細'}")
-    print("-" * 124)
+        print(f"    {ym} | {len(arr):>2} 筆 | 勝率 {w:>2}/{len(arr):<2} ({w/len(arr)*100:5.1f}%) | 月淨利 {sum(x['net_ret_pct'] for x in arr):>+6.2f}%")
+    print("-" * 116)
+    print(f"{'#':>2} | {'進場時間 (TPE)':<16} | {'進場價':>6} | {'4H高點':>6} | {'乖離':>6} | {'5m波動':>6} | {'4H最大跌':>7} | {'淨損益':>7} | {'動態分批出場明細'}")
+    print("-" * 116)
     for idx, t in enumerate(trades, 1):
         print(
-            f"{idx:>2} | {t['symbol']:<8} | {t['entry_dt']:<16} | {t['entry_p']:>6.2f} | "
+            f"{idx:>2} | {t['entry_dt']:<16} | {t['entry_p']:>6.2f} | "
             f"{t['peak_high']:>6.2f} | {t['surge_atr']:>4.1f}AT | {t['atr_pct']:>5.2f}% | "
             f"-{t['drop_4h_pct']:>5.2f}% | {t['net_ret_pct']:>+6.2f}% | {t['reason']}"
         )
-    print("=" * 124)
+    print("=" * 116)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SOXSUSDT + SOXLUSDT 5m 雙刀流 V3 穩健優化回測腳本")
-    parser.add_argument("--symbol", default="BOTH", choices=["BOTH", "SOXSUSDT", "SOXLUSDT"], help="回測標的")
+    parser = argparse.ArgumentParser(description="SOXSUSDT 5m 起跌點狙擊 V3 專屬穩健回測腳本")
     parser.add_argument("--start", default="2026-07-23", help="正式回測起始日 (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-11-21", help="正式回測結束日 (YYYY-MM-DD)")
     parser.add_argument("--fee-rt", type=float, default=0.08, help="來回手續費+滑價總成本 %% (預設 0.08%%)")
     parser.add_argument("--export-json", default="", help="匯出交易明細 JSON 路徑")
     args = parser.parse_args()
 
-    # 自動往前多抓 6 天作為 3 日均線 (72H) 與 MA(200) 暖機區間
     warmup_start = (datetime.strptime(args.start, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
-    symbols = ["SOXSUSDT", "SOXLUSDT"] if args.symbol == "BOTH" else [args.symbol]
+    print(f"正在從 Binance 下載 {SYMBOL} 5m 歷史 K 線 ({warmup_start} ~ {args.end})...")
+    rows = download_soxs_5m(warmup_start, args.end)
+    compute_indicators(rows)
+    trades = backtest_soxs_v3(rows, backtest_start_dt=f"{args.start} 00:00", fee_rt_pct=args.fee_rt)
 
-    all_trades = []
-    for sym in symbols:
-        print(f"正在從 Binance 下載 {sym} 5m 歷史 K 線 ({warmup_start} ~ {args.end})...")
-        rows = download_binance_5m(sym, warmup_start, args.end)
-        compute_indicators(rows)
-        trades = backtest_v3(sym, rows, backtest_start_dt=f"{args.start} 00:00", fee_rt_pct=args.fee_rt)
-        all_trades.extend(trades)
-
-    summarize_portfolio(
-        all_trades,
-        f"SOXSUSDT + SOXLUSDT 雙刀流 V3 穩健優化版 ({args.start} ~ {args.end}｜來回成本 {args.fee_rt:.2f}%)",
-    )
+    print_report(trades, f"SOXSUSDT 5m 起跌點狙擊 V3 專屬穩健版 ({args.start} ~ {args.end}｜來回成本 {args.fee_rt:.2f}%)")
 
     if args.export_json:
-        all_trades.sort(key=lambda x: x["entry_dt"])
         with open(args.export_json, "w", encoding="utf-8") as f:
-            json.dump(all_trades, f, ensure_ascii=False, indent=2)
-        print(f"已匯出 {len(all_trades)} 筆交易明細至 {args.export_json}")
+            json.dump(trades, f, ensure_ascii=False, indent=2)
+        print(f"已匯出 {len(trades)} 筆交易明細至 {args.export_json}")
 
 
 if __name__ == "__main__":
